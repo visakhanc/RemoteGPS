@@ -1,17 +1,19 @@
-/*
- * board.c
- *
- *  Created on: Apr 5, 2017
- *      Author: Visakhan C
+/**
+ * @file
+ * @brief  	Board initialization and utility functions
+ * @date	April 4, 2017
+ * @author	Visakhan
  */
 
 #include "board.h"
-#include "stm32f1xx_hal.h"
+//#include "stm32f1xx_hal.h"
 
-
+/**
+ * @brief This structure contains initialization settings for each port pins used
+ */
 struct gpio_init_entry {
-	GPIO_TypeDef *Port;
-	GPIO_InitTypeDef Init;
+	GPIO_TypeDef *Port;		/**< Pointer to Register structure of GPIO port which contains the pin */
+	GPIO_InitTypeDef Init;	/**< Structure containing initialization settings for the pin */
 } Gpio_Init_Table[] = {
 {LED_GPIO_PORT, 		{LED_PIN, 			GPIO_MODE_OUTPUT_PP, 	GPIO_NOPULL, 	GPIO_SPEED_HIGH }		},
 {BUTTON_GPIO_PORT, 		{BUTTON_PIN, 		GPIO_MODE_INPUT, 		GPIO_PULLDOWN,	GPIO_SPEED_MEDIUM }		},
@@ -29,7 +31,10 @@ struct gpio_init_entry {
 {BAT_MON_GPIO_PORT,		{BAT_MON_PIN,		GPIO_MODE_ANALOG,		GPIO_NOPULL,	GPIO_SPEED_MEDIUM}		},
 {BAT_CHRG_GPIO_PORT,	{BAT_CHRG_PIN,		GPIO_MODE_INPUT,		GPIO_NOPULL,	GPIO_SPEED_MEDIUM}		},
 {USBDP_GPIO_PORT, 		{USBDP_PIN, 		GPIO_MODE_AF_INPUT,		GPIO_NOPULL, 	GPIO_SPEED_HIGH}		},
-{USBDM_GPIO_PORT, 		{USBDM_PIN, 		GPIO_MODE_AF_INPUT,		GPIO_NOPULL,	GPIO_SPEED_HIGH}		}
+{USBDM_GPIO_PORT, 		{USBDM_PIN, 		GPIO_MODE_AF_INPUT,		GPIO_NOPULL,	GPIO_SPEED_HIGH}		},
+{OSC32_IN_GPIO_PORT,	{OSC32_IN_PIN, 		GPIO_MODE_AF_INPUT,		GPIO_NOPULL, 	GPIO_SPEED_HIGH}		},
+{OSC32_OUT_GPIO_PORT,	{OSC32_OUT_PIN, 	GPIO_MODE_AF_INPUT,		GPIO_NOPULL,	GPIO_SPEED_HIGH}		}
+
 };
 
 
@@ -49,7 +54,7 @@ void Board_Init(void)
 	__HAL_RCC_USART1_CLK_ENABLE();
 	__HAL_RCC_ADC1_CLK_ENABLE();
 	__HAL_RCC_ADC_CONFIG(RCC_ADCPCLK2_DIV8);  /* Set prescaler for ADC clock (ADC clock should be <14MHz) */
-
+	__HAL_RCC_TIM2_CLK_ENABLE();
 
 	/* Release JTAG Reset pin for PB3 & PB4 GPIO functionality */
 	__HAL_AFIO_REMAP_SWJ_NOJTAG();
@@ -66,6 +71,8 @@ void Board_Init(void)
 	HAL_NVIC_SetPriority(EXTI0_IRQn, 8, 0);
 	HAL_NVIC_SetPriority(EXTI3_IRQn, 8, 0);
 	HAL_NVIC_SetPriority(EXTI15_10_IRQn, 8, 0);
+	HAL_NVIC_SetPriority(RTC_IRQn, 8, 0);
+	HAL_NVIC_SetPriority(RTC_Alarm_IRQn, 8, 0);
 
 	/* Enable required interrupts in NVIC */
 	NVIC_EnableIRQ(USART1_IRQn);
@@ -74,6 +81,12 @@ void Board_Init(void)
 	NVIC_EnableIRQ(EXTI0_IRQn);
 	NVIC_EnableIRQ(EXTI3_IRQn);
 	NVIC_EnableIRQ(EXTI15_10_IRQn);
+	NVIC_EnableIRQ(RTC_IRQn);
+	NVIC_EnableIRQ(RTC_Alarm_IRQn);
+	NVIC_EnableIRQ(TIM2_IRQn);
+
+	//NVIC_EnableIRQ(RCC_IRQn);
+	//RCC->CIR = RCC_CIR_LSERDYIE;
 
 	/* Initial values for output pins */
 	HAL_GPIO_WritePin(LED_GPIO_PORT,LED_PIN, GPIO_PIN_RESET);
@@ -96,10 +109,14 @@ void Board_Init(void)
 #if NETLIGHT_INTERRUPT_ENABLED
 	/* Setup external interrupt for NETLIGHT pin */
 	AFIO->EXTICR[3] |= AFIO_EXTICR4_EXTI14_PB;
-	EXTI->RTSR |= EXTI_RTSR_RT14;	/* Rising and Falling edge trigger */
-	EXTI->FTSR |= EXTI_FTSR_FT14;
+	EXTI->RTSR |= EXTI_RTSR_RT14;	/* Rising edge trigger */
+	//EXTI->FTSR |= EXTI_FTSR_FT14; /* Falling edge trigger */
 	EXTI->IMR |= EXTI_IMR_IM14;
 #endif
+
+	/* Setup EXTI 17 (RTC) for rising edge interrupt */
+	EXTI->RTSR |= EXTI_RTSR_RT17;
+	EXTI->IMR |= EXTI_IMR_IM17;
 }
 
 
@@ -109,28 +126,18 @@ uint32_t Button_GetState(void)
 }
 
 
-/**
-  * @brief  Turns  LED On.
-  * @retval None
-  */
+
 void LED_On(void)
 {
   HAL_GPIO_WritePin(LED_GPIO_PORT, LED_PIN, GPIO_PIN_SET);
 }
 
-/**
-  * @brief  Turns LED Off.
-  * @retval None
-  */
+
 void LED_Off(void)
 {
   HAL_GPIO_WritePin(LED_GPIO_PORT, LED_PIN, GPIO_PIN_RESET);
 }
 
-/**
-  * @brief  Toggles the LED.
-  * @retval None
-  */
 void LED_Toggle(void)
 {
   HAL_GPIO_TogglePin(LED_GPIO_PORT, LED_PIN);
