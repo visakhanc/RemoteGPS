@@ -1,11 +1,13 @@
-/*
- * gps_task.c
+/**
+ * 	@file	gps_task.c
+ * 	@brief  Contains a Task for which processes received GPS sentences and updates GPS parameters
+ * 			such as latitude, longitude etc.
+ *	@author	Visakhan
+ *	@date	Apr 09, 2017
  *
- *  Created on: Jul 5, 2015
- *  Modified: Apr 09, 2017
- *  	- Modified for STM32F103 target
+ *	Originally created: July 5, 2015
+ * 	@note Modifications : Modified for STM32F103 target
  *
- *  Author: Visakhan C
  */
 
 #include <gps_common.h>
@@ -21,16 +23,54 @@
 #include "task.h"
 #include "semphr.h"
 
-uint32_t gps_send_cmd(uint8_t *cmdBuf, uint32_t len);
+
+/**********************************************************
+ * 					PUBLIC FUNCTIONS
+ *********************************************************/
+
+/**********************************************************
+ * 					PRIVATE FUNCTIONS
+ *********************************************************/
 static void gps_uart_rx_handler(USART_TypeDef *base, uart_handle_t *handle, uart_status_t status);
 
-static uint8_t gps_rx_buf[2], gps_rx_sentence[200];
+
+/**********************************************************
+ * 					GLOBAL VARIABLES
+ *********************************************************/
+volatile int gps_count = 0;
+volatile bool gps_progress = false;
+
+
+/**********************************************************
+ * 					PRIVATE VARIABLES
+ *********************************************************/
+/* Buffer used by UART ISR to store received character from GPS module */
+static uint8_t gps_rx_buf[2];
+
+/* Buffer which holds an entire sentence of data from GPS module (excluding '$') */
+static uint8_t gps_rx_sentence[200];
+
+/* Number of characters stored in the sentence buffer */
 static uint32_t gps_rx_len;
+
+/* Task handle for GPS task */
 static TaskHandle_t xGpsTaskHandle;
+
+/* Semaphore which is released when UART transmission towards GPS
+ * module is complete */
 static xSemaphoreHandle xGpsTxSyncSem;
+
+/* Semaphore which is released when positive Acknowledgment
+ * is received from GPS module in response to a PMTK command */
 static xSemaphoreHandle xGpsAckSem;
-gps_info_struct gps_info;
+
+/* Structure holding updated GPS status values (latitude, longitude etc.) */
+volatile gps_info_struct gps_info;
+
+/* Driver Handle structure for GPS UART */
 uart_handle_t gps_uart_handle;
+
+/* Configuration parameters for GPS UART */
 uart_config_t gps_uart_config = {
 						.BaudRate = GPS_UART_BAUDRATE,
 						.ParityMode = Uart_Parity_None,
@@ -39,17 +79,13 @@ uart_config_t gps_uart_config = {
 						.EnableTx = true
 					};
 
-volatile int gps_count = 0;
-volatile bool gps_progress = false;
 
-/*TASK*-----------------------------------------------------
- *
- * Task Name    : gps_task
- * Comments     :
- *
- *
- *END*-----------------------------------------------------*/
-
+/**
+ * @brief 	Task to process received GPS sentences. Blocks while waiting until a complete sentence is
+ * 		  	received, then process the sentences to update GPS status variables.
+ * @param 	pArg : Not used
+ * @retval 	None
+ */
 void gps_task(void *pArg)
 {
 
@@ -69,12 +105,9 @@ void gps_task(void *pArg)
 
 	/* Initialize UART driver with given parameters */
 	Uart_Init(GPS_UART, &gps_uart_handle, &gps_uart_config);
-
 	Uart_Set_Callback(GPS_UART, gps_uart_rx_handler);
-
 	/* Set receive buffer pointer and size */
 	Uart_Set_Rx_Params(GPS_UART, gps_rx_buf, 1);
-
 	/* Enable RX interrupt (start reception of bytes from GPS module) */
 	Uart_StartReceive(GPS_UART);
 
@@ -96,15 +129,20 @@ void gps_task(void *pArg)
 				data_ptr = &rx_sentence[6];
 				gps_parse_rmc(data_ptr, &gps_info);
 			}
-			/* PMTK acknowledgment */
+			/* PMTK acknowledgment (eg: $PMTK001,869,3*37<CR><LF> )*/
 			else if(NULL != strstr(rx_sentence, "PMTK001")) {
 				if(rx_sentence[12] == '3') {
 					xSemaphoreGive(xGpsAckSem);
 				}
 			}
-			else if(NULL != strstr(rx_sentence, "PQTXT")) {
-				if(rx_sentence[8] == 'O') { /* ..OK.. */
-					xSemaphoreGive(xGpsAckSem);
+			else if(NULL != strstr(rx_sentence, "GPTXT")) {
+				if(rx_sentence[25] == 'O') {
+					if(rx_sentence[26] == 'K') { /* ANTSTATUS=OK */
+						gps_info.ext_antenna = true;
+					}
+					else if(rx_sentence[26] == 'P') {
+						gps_info.ext_antenna = false;
+					}
 				}
 			}
 			gps_count++;
@@ -121,34 +159,14 @@ void gps_task(void *pArg)
 }
 
 
-/*
- * 	Send PMTK command to GPS module
- * 	Parameters:
- * 		cmdBuf: Command string in the format: "$PMTK...*"
-* 		len: number of characters in the command string
- */
+
 uint32_t gps_send_cmd(uint8_t *cmdBuf, uint32_t len)
 {
 	uint32_t ret = 0;
-	uint8_t checksum = 0;
-	uint32_t index = 1;
-	while(index < len-1)
-	{
-		checksum ^= cmdBuf[index++];
-	}
-	index++; // skip '*'
-	byte_to_str(checksum, &cmdBuf[index]);
-	index +=2;
-	cmdBuf[index++] = '\r';
-	cmdBuf[index] = '\n';
-	Debug_Console_PutBuf(cmdBuf, index+1);
-	/* Send command through UART */
-	Uart_Send(GPS_UART, cmdBuf, index+1);
-	/* Wait for Tx completion signal */
-	if(xSemaphoreTake(xGpsTxSyncSem, 1000) != pdTRUE) {
-		DEBUG_PUTS("GPS_TX_ERROR\r\n");
-		ret = 1;
-	}
+
+	//Debug_Console_PutBuf(cmdBuf, len);
+	/* Send command to GPS module */
+	ret = gps_send(cmdBuf, len);
 	/* Wait for GPS acknowledgment */
 	if(xSemaphoreTake(xGpsAckSem, 2000) != pdTRUE) {
 		DEBUG_PUTS("GPS_ACK_ERR\r\n");
@@ -158,12 +176,29 @@ uint32_t gps_send_cmd(uint8_t *cmdBuf, uint32_t len)
 }
 
 
-/*
- * 	UART handler for GPS UART
- *	(Called from within the UART ISR)
- *
- * 	On getting first '$' character, puts the subsequent character into a buffer.
- * 	When CR-LF termination is received, signals the gps task.
+uint32_t gps_send(uint8_t *buf, uint32_t len)
+{
+	uint32_t ret = 0;
+
+	/* Send command through UART */
+	Uart_Send(GPS_UART, buf, len);
+	/* Wait for Tx completion signal */
+	if(xSemaphoreTake(xGpsTxSyncSem, 1000) != pdTRUE) {
+		DEBUG_PUTS("GPS_TX_ERROR\r\n");
+		ret = 1;
+	}
+
+	return ret;
+}
+
+
+/**
+ * 	@brief 	Handler function for GPS UART Interrupt, called from within the UART ISR
+ *			On getting first '$' character, puts the "subsequent" character into a buffer.
+ * 			When CR-LF termination is received, signals the gps task.
+ * 	@param 	base : UART Register structure base pointer
+ * 	@param	handle : UART driver handle
+ * 	@param	status : Status of UART operation
  */
 static void gps_uart_rx_handler(USART_TypeDef *base, uart_handle_t *handle, uart_status_t status)
 {
