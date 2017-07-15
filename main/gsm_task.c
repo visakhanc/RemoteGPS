@@ -1,11 +1,9 @@
-/*
- * gsm_task.c
- *
- *  Created on: Jul 5, 2015
- *  Modified: Apr 09, 2017
- *  	- Modified for STM32F103 target
- *
- *  Author: Visakhan C
+/**
+ * @file gsm_task.c
+ * @author Visakhan
+ * @date April 09, 2017
+ * @details Originally created: July 5, 2015.
+ * Modified for STM32F103 target
  */
 
 #include <stdio.h>
@@ -16,14 +14,36 @@
 #include "board.h"
 #include "debug_console.h"
 
-/* Provate Functions */
+
+/**********************************************************
+ * 					PUBLIC FUNCTIONS
+ *********************************************************/
+
+/**********************************************************
+ * 					PRIVATE FUNCTIONS
+ *********************************************************/
 static void gsm_uart_rx_handler(USART_TypeDef *base, uart_handle_t *handle, uart_status_t status);
 
-/***** Globals ******/
-//extern gps_info_struct gps_info;
+
+/**********************************************************
+ * 					GLOBAL VARIABLES
+ *********************************************************/
+
+/**
+ * @brief Holds the status variables of GSM module
+ */
 gsm_status_struct gsm_status;
+
+/**
+ * @brief Buffer to receive response of HTTP GET or POST
+ */
 char http_buf[HTTP_BUF_SIZE];
 
+
+
+/**********************************************************
+ * 					PRIVATE VARIABLES
+ *********************************************************/
 
 /* FreeRTOS resources */
 static TaskHandle_t xGsmTaskHandle;
@@ -65,7 +85,7 @@ void gsm_debug_task(void *pArg)
 
 	while(1)
 	{
-		/* Get input from debug port and send to SIM900 */
+		/* Get input from debug port */
 		DEBUG_PUTS("\r\nM66>");
 		i = 0;
 		while(i < sizeof(text)) {
@@ -79,7 +99,7 @@ void gsm_debug_task(void *pArg)
 			i++;
 		}
 		len = i+1;
-
+		/*Send the command to GSM module */
 		gsm_uart_acquire();
 		gsm_uart_send(text, len);
 		gsm_uart_release();
@@ -91,10 +111,11 @@ void gsm_debug_task(void *pArg)
 
 
 
-/* Sends the GSM AT command 'cmd' through UART
- * NOTE: cmd should be null terminated
- *
- * Return: 0 - success; 1 - failure
+/**
+ * @brief Sends the GSM AT command through UART
+ * @note The function sends CR-LF after the command string
+ * @param cmd Null terminated AT command string
+ * @return 0: Success, 1: Error
  */
 int gsm_send_command(const char *cmd)
 {
@@ -104,7 +125,6 @@ int gsm_send_command(const char *cmd)
 	if(gsm_uart_send(cmd, strlen(cmd)) != 0) {
 		ret = 1;
 	}
-
 	/* Send carriage return */
 	if(gsm_uart_send("\r\n", 2) != 0) {
 		ret = 1;
@@ -114,15 +134,14 @@ int gsm_send_command(const char *cmd)
 }
 
 
-/*
- *  Get access to GSM UART by acquiring semaphore
- *
- *  NOTE: Tasks which communicate to GSM module will call this before
- *  the section of code which deals with all communication with the module.
- *  After this the Task releases the access by gsm_uart_release()
- *
- *  After this call the task would block indefinitely until acquiring the semaphore
- *  Return:
+
+/**
+ * @brief Get access to GSM UART by acquiring semaphore
+ * @note Tasks which communicate to GSM module would call this before
+ * the section of code which deals with all communication with the module.
+ * After this the Task releases the access by @ref gsm_uart_release()
+ * @note The calling task would block indefinitely until acquiring the semaphore
+ * @return
  *  	0 - Acquire successful
  *  	1 - Something went wrong
  */
@@ -136,10 +155,10 @@ int gsm_uart_acquire(void)
 	return 0;
 }
 
-/*
- *  Releases the access to GSM UART acquired by calling gsm_uart_acquire()
- *
- *  Return:
+
+/**
+ * @brief Releases the access to GSM UART acquired by calling @ref gsm_uart_acquire()
+ * @return
  *  	0 - Success
  *  	1 - Error
  */
@@ -154,12 +173,16 @@ int gsm_uart_release(void)
 }
 
 
-/*
- * Transmit data to GSM UART
+
+/**
+ * @brief Transmit data through GSM UART
+ * @details This function:
  * 	1. Calls UART driver API
- * 	2. Waits for TaskNotification from UART Handler
- *
- * 	Return: 0 - success; 1 - error
+ * 	2. Waits until semaphore is released by UART Handler
+ * @note Blocks waiting for semaphore to be released by UART handler
+ * @param data Buffer containing data to be sent
+ * @param len Number of bytes to send
+ * @return Always returns 0
  */
 int gsm_uart_send(const char *data, uint32_t len)
 {
@@ -172,11 +195,16 @@ int gsm_uart_send(const char *data, uint32_t len)
 	return 0;
 }
 
-/*
- * Send SMS message to number given in 'address'
- * 	length of message should be less than 160
- * 	Message should be null terminated
- * Returns: 0 - success; 1 - error
+
+
+
+/**
+ * @brief Send SMS message to a specified mobile number
+ * @attention Message should be null terminated
+ * @param buf Buffer containing message to be sent
+ * @param length Number of characters to be sent
+ * @param address Recipient address
+ * @return 0: Success, 1: Error
  */
 int gsm_send_sms(const char *buf, int length, const char *address)
 {
@@ -248,11 +276,12 @@ int gsm_send_sms(const char *buf, int length, const char *address)
 }
 
 
-/*
- *  Task for handling various response strings received from GSM module
- *  This task waits for signal from UART Rx handler, indicating that a complete string is received
+/**
+ * @brief Task for handling various response strings received from GSM module
+ * @details This task waits for signal from UART Rx handler, indicating that a complete string is received
  *  The string is then checked against known response strings, relevant to the application
- *  For each of the identified string, corresping event is signalled or global status is updated
+ *  For each of the identified string, corresponding event is signaled or global status is updated
+ * @param pArg Not used
  */
 void gsm_rx_task(void *pArg)
 {
@@ -288,6 +317,7 @@ void gsm_rx_task(void *pArg)
 
 		/* Wait for signal from UART Rx handler */
 		if(ulTaskNotifyTake(pdTRUE, portMAX_DELAY) == 1) {
+			gsm_status.power_state = GSM_POWERON;
 			/* Copy GSM response string to local buffer */
 			len = gsm_rx_len;
 			if(len >= sizeof(rx_buf)) {
@@ -297,8 +327,8 @@ void gsm_rx_task(void *pArg)
 			rx_buf[len] = '\0';
 
 #if GSM_DEBUG
-			Debug_Console_PutBuf(rx_buf, strlen(rx_buf));
 			DEBUG_PUTS("\r\n");
+			Debug_Console_PutBuf(rx_buf, strlen(rx_buf));
 #endif
 			/* Response of 2 characters */
 			if (2 == len) {
@@ -331,11 +361,11 @@ void gsm_rx_task(void *pArg)
 				if (NULL != strstr((char *)rx_buf, "+CREG")) {
 					/* Get and update registration status */
 					if ((rx_buf[9] == '1') || (rx_buf[9] == '5')) {
-						gsm_status.registerd = true;
+						gsm_status.registered = true;
 						xEventGroupSetBits(xGsmEvent, EVENT_GSM_CREG);
 					}
 					else {
-						gsm_status.registerd = false;
+						gsm_status.registered = false;
 					}
 				}
 
@@ -367,8 +397,9 @@ void gsm_rx_task(void *pArg)
 
 
 
-/*
- * Set the given event(s) of the GSM event group
+/**
+ * @brief Set the given event(s) of the GSM event group
+ * @param events Event(s) to be set. See @ref GSM_Event_Bits for possible events
  */
 void gsm_set_event(uint32_t events)
 {
@@ -376,18 +407,21 @@ void gsm_set_event(uint32_t events)
 }
 
 
-/*
- * Clear the given event(s) of the GSM event group
+/**
+ * @brief Clear the given event(s) of the GSM event group
+ * @param events Event(s) to be cleared. See @ref GSM_Event_Bits for possible events
  */
 void gsm_clear_event(uint32_t events)
 {
 	xEventGroupClearBits(xGsmEvent, events);
 }
 
-/*
- * Wait for one or more GSM events, for a duration of 'delay_ticks'
- *
- * delay_ticks: number of ticks to wait (0: wait indefinitely)
+
+/**
+ * @brief Wait for one or more GSM events until specified ticks is elapsed
+ * @param events Event(s) to wait for; The function returns if any of the events is set
+ * @param delay_ticks Number of ticks to wait (0: wait indefinitely)
+ * @return The event which was set; 0 indicates no events were set before delay_ticks elapsed
  */
 uint32_t gsm_wait_for_event(uint32_t events, uint32_t delay_ticks)
 {
@@ -398,11 +432,13 @@ uint32_t gsm_wait_for_event(uint32_t events, uint32_t delay_ticks)
 }
 
 
-/*
- * 	UART Rx handler for GSM UART
- * 	Puts character into a buffer, until CR-LF termination is recieved and signals the gsm_rx_task .
- *
- *  Note: This is called from the UART RX ISR
+/**
+ * @brief UART ISR handler for GSM UART
+ * @details Puts character into a buffer, until CR-LF termination is received and signals the @ref gsm_rx_task
+ * @note This is called from the UART ISR
+ * @param base UART base address
+ * @param handle UART driver handle
+ * @param status Status of UART when handler is called
  */
 static void gsm_uart_rx_handler(USART_TypeDef *base, uart_handle_t *handle, uart_status_t status)
 {

@@ -179,5 +179,15 @@ void byte_to_str(uint8_t byte, uint8_t *str)
 	*str++ = (val < 10) ? (val + '0') : (val-10 + 'A');
 }
 
+uint8_t calc_checksum(uint8_t *buf, uint32_t len)
+{
+	uint8_t checksum = 0;
+	while(len--)
+	{
+		checksum ^= *buf++;
+	}
+	return checksum;
+}
+
 
 

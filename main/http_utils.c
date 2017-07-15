@@ -108,7 +108,7 @@ http_error_t http_post(char *url, uint32_t urlLen, uint8_t *data, uint32_t dataL
 	snprintf(http_cmd_buf, sizeof(http_cmd_buf), "AT+QHTTPURL=%d,3", (int)urlLen);
 	gsm_status.http_sendto_module = true;
 	gsm_send_command(http_cmd_buf);
-	ev = gsm_wait_for_event(EVENT_GSM_HTTPCONNECT|EVENT_GSM_ERROR|EVENT_GSM_CME_ERROR, 1000);
+	ev = gsm_wait_for_event(EVENT_GSM_HTTPCONNECT|EVENT_GSM_ERROR|EVENT_GSM_CME_ERROR, 3000);
 	if(ev & EVENT_GSM_HTTPCONNECT) {
 		DEBUG_PUTS("Sending URL..\r\n");
 		gsm_send_command(url);
@@ -118,10 +118,11 @@ http_error_t http_post(char *url, uint32_t urlLen, uint8_t *data, uint32_t dataL
 		}
 	}
 	else if(ev & (EVENT_GSM_ERROR|EVENT_GSM_CME_ERROR)) {
-		DEBUG_PUTS("URL command error\r\n");
+		DEBUG_PUTS("URL cmd err\r\n");
 		ret = (gsm_status.cme_error) ? gsm_status.cme_error : HTTP_ERR_URL;
 	}
 	else {
+		DEBUG_PUTS("URL cmd timeout\r\n");
 		ret = HTTP_ERR_EVENT_TIMEOUT;
 		//ret = 2;
 	}
@@ -135,7 +136,7 @@ http_error_t http_post(char *url, uint32_t urlLen, uint8_t *data, uint32_t dataL
 			gsm_send_command((char *)data);
 			ev = gsm_wait_for_event(EVENT_GSM_OK|EVENT_GSM_CME_ERROR, 6000);
 			if(ev & EVENT_GSM_CME_ERROR) {
-				DEBUG_PUTS("POST data error\r\n");
+				DEBUG_PUTS("POST data error!\r\n");
 				ret = gsm_status.cme_error;
 			}
 			else if(!(ev & EVENT_GSM_OK)) {
@@ -143,10 +144,11 @@ http_error_t http_post(char *url, uint32_t urlLen, uint8_t *data, uint32_t dataL
 			}
 		}
 		else if(ev & (EVENT_GSM_CME_ERROR|EVENT_GSM_ERROR)) {
-			DEBUG_PUTS("POST Req error\r\n");
+			DEBUG_PUTS("POST Req error!\r\n");
 			ret = gsm_status.cme_error ? gsm_status.cme_error : HTTP_ERR_POST;
 		}
 		else {
+			DEBUG_PUTS("POST cmd timeout!\r\n");
 			ret = HTTP_ERR_EVENT_TIMEOUT;
 		}
 	}

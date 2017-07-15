@@ -1,43 +1,46 @@
 /*
  * monitor_taks.c
  *
- *	This Task wsits for commands from remote user and controls other tasks
+ *	This Task waits for various events and controls other tasks
  *
  *  Created on: Jun 19, 2016
  *      Author: Visakhan C
  */
 
+#include <string.h>
+#include "stm32f1_rtc.h"
+#include "debug_console.h"
+#include "config_private.h"
 #include "board.h"
 #include "gsm_common.h"
 #include "gps_common.h"
-#include "debug_console.h"
-#include "config_private.h"
-#include <string.h>
+#include "stm32f1_timer.h"
+
+extern void log_task_switch(void);
+extern void SystemClock_Config(void);
+
 
 static TaskHandle_t		xBatteryTaskHandle;
 static TimerHandle_t	buttonTimer;
 static volatile bool 	buttonTimerStarted;
-//extern void log_task_switch(void);
-
 
 static void ButtonTimerCallback(TimerHandle_t xTimer);
 
 void monitor_task(void *pvParameters)
 {
 	EventBits_t ev;
+	uint8_t gps_cmd[] = "$PMTK161,0*28\r\n";
+
+	/* Initialize timer for measuring NETLIGHT pin signal */
+	Timer_Init(TIM2, SystemCoreClock/1000, 4000);
 
 	/* Create Timer for monitoring power button */
-	buttonTimer = xTimerCreate("TIMER0", 200, pdTRUE, (void *)0, ButtonTimerCallback);
-#if 0
-	vTaskDelay(2000);
-	if(0 == gps_send_cmd((uint8_t *)gps_cmd, strlen(gps_cmd))) {
-		DEBUG_PUTS("GPS command OK\r\n");
-	}
-#endif
+	buttonTimer = xTimerCreate("BUT_TMR", 200, pdTRUE, (void *)0, ButtonTimerCallback);
+
 	while(1) {
 
 		/* Wait for call to begin logging */
-		ev = gsm_wait_for_event(EVENT_GSM_RING | EVENT_GSM_POWERSWITCH, 0);
+		ev = gsm_wait_for_event(EVENT_GSM_RING | EVENT_GSM_POWERSWITCH | EVENT_BUTTON_PRESS, 0);
 		if(ev & EVENT_GSM_RING) {
 			ev = gsm_wait_for_event(EVENT_GSM_CLIP, 1000);
 			if (ev & EVENT_GSM_CLIP) {
@@ -55,7 +58,7 @@ void monitor_task(void *pvParameters)
 					/* Process only if number is registered */
 					if (0 == strcmp((char *)gsm_status.caller, AUTH_CALLER)) {
 						/* Start/Stop logging */
-						//log_task_switch();
+						log_task_switch();
 					}
 
 					/* Release uart access */
@@ -74,10 +77,11 @@ void monitor_task(void *pvParameters)
 			if(gsm_status.power_state == GSM_POWERON) {
 				/* Power off GSM Module */
 				LED_On();
-				gsm_send_command("AT+QPOWD=1");
+				if(0 != gsm_uart_acquire()) { DEBUG_PUTS("monitor: uart_acquire failed\r\n"); }
+				gsm_send_command("AT+QPOWD=0");
+				if(0 != gsm_uart_release()) { DEBUG_PUTS("monitor: uart_release failed\r\n"); }
 				vTaskDelay(300);
 				gsm_status.power_state = GSM_POWERDOWN;
-				gsm_status.registerd = false;
 				LED_Off();
 				DEBUG_PUTS("POWEROFF...\r\n");
 			}
@@ -92,6 +96,43 @@ void monitor_task(void *pvParameters)
 				DEBUG_PUTS("POWERED ON...\r\n");
 			}
 		}
+		if(ev & EVENT_BUTTON_PRESS) {
+			if(gsm_status.power_state == GSM_POWERON) {
+				LED_On();
+				DEBUG_PUTS("\r\n...Entering SYSTEM SLEEP...\r\n");
+				if(0 != gsm_uart_acquire()) { DEBUG_PUTS("monitor: uart_acquire failed\r\n"); }
+				/* Set GSM Module in sleep mode */
+				gsm_send_command("AT+QSCLK=1");
+				if(0 != gsm_uart_release()) { DEBUG_PUTS("monitor: uart_release failed\r\n"); }
+				if(gsm_wait_for_event(EVENT_GSM_OK, 1000) & EVENT_GSM_OK) {
+					HAL_GPIO_WritePin(GSM_DTR_GPIO_PORT, GSM_DTR_PIN, GPIO_PIN_SET);
+				}
+				else {
+					DEBUG_PUTS("GSM Sleep error\r\n");
+				}
+				/* Set GPS Module in Standby mode */
+				if(gps_send_cmd(gps_cmd, strlen(gps_cmd)) != 0) {
+					DEBUG_PUTS("GPS Standby error\r\n");
+				}
+				LED_Off();
+				/* MCU Power-down */
+				DEBUG_PUTS("\r\nENTERING STOP...\r\n");
+				RTC_Set_Counter(0);
+				RTC_Alarm_Config(15);
+				__HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
+				HAL_PWR_EnterSTOPMode(PWR_MAINREGULATOR_ON, PWR_STOPENTRY_WFI);
+				/* Setup HSE clock configuration again */
+				SystemClock_Config();
+				DEBUG_PUTS("\r\n...BACK FROM STOP\r\n");
+				/* Set GPS in Full on mode */
+				gps_send("abc", 3);
+				/* Put GSM back to normal mode */
+				HAL_GPIO_WritePin(GSM_DTR_GPIO_PORT, GSM_DTR_PIN, GPIO_PIN_RESET);
+			}
+
+		}
+
+
 	}
 }
 
@@ -123,12 +164,26 @@ void battery_task(void *pvParams)
 	}
 }
 
+/**
+ * @brief Callback for FreeRTOS Timer to sample user button pressed state
+ * @details Timer starts when user presses button. After each timer period(200ms),
+ * this callback is called. If button is no longer pressed, the timer is stopped.
+ * If button remains pressed the timer continues to run. If timer elapses 12 times,
+ * indicating 2.4sec press duration, the Power switch event is set and timer is stopped
+ *
+ * @param xTimer Timer handle
+ */
 static void ButtonTimerCallback(TimerHandle_t xTimer)
 {
 	uint32_t count = (uint32_t) pvTimerGetTimerID(xTimer);
 	GPIO_PinState	pin_state = HAL_GPIO_ReadPin(BUTTON_GPIO_PORT, BUTTON_PIN);
 	count++;
 	vTimerSetTimerID(xTimer, (void *)count);
+
+	if(count == 1) {
+		//gsm_set_event(EVENT_BUTTON_PRESS);  /* TESTING: Used to enter Low power mode */
+	}
+
 	/* If Button is no longer pressed (less than 2.4 sec) or pressed for 2.4 sec exactly */
 	if((pin_state == GPIO_PIN_RESET) || ((pin_state == GPIO_PIN_SET) && (count == 12)) ) {
 		/* Stop timer and reset timer ID value */
@@ -142,6 +197,10 @@ static void ButtonTimerCallback(TimerHandle_t xTimer)
 	}
 }
 
+/**
+ * @brief IRQ Handler for EXTI0 External interrupt
+ * @note Used to handle on-board user button
+ */
 void EXTI0_IRQHandler(void)
 {
 	BaseType_t 	xHigherPriorityTaskWoken = pdFALSE;
@@ -158,7 +217,10 @@ void EXTI0_IRQHandler(void)
 	portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
-
+/**
+ * @brief IRQ Handler for EXTI3 External interrupt
+ * @note Used to handle battery charging indicator GPIO
+ */
 void EXTI3_IRQHandler(void)
 {
 	BaseType_t 	xHigherPriorityTaskWoken = pdFALSE;
@@ -182,14 +244,49 @@ void EXTI3_IRQHandler(void)
 	}
 }
 
+/**
+ * @brief IRQ Handler for EXTI15_10 External interrupts
+ * @note Used for handling NETLIGHT GPIO of GSM module
+ */
 void EXTI15_10_IRQHandler(void)
 {
 	GPIO_PinState netlight_pin = 0;
+	uint32_t timer_val = TIM2->CNT;
 
 	/* Clear interrupt flag on EXTI14 pin */
 	if(EXTI->PR & EXTI_PR_PIF14) {
 		EXTI->PR = EXTI_PR_PIF14;
-		netlight_pin = HAL_GPIO_ReadPin(GSM_NETLIGHT_GPIO_PORT, GSM_NETLIGHT_PIN);
-		(netlight_pin == GPIO_PIN_SET) ? LED_On() : LED_Off();
+		//netlight_pin = HAL_GPIO_ReadPin(GSM_NETLIGHT_GPIO_PORT, GSM_NETLIGHT_PIN);
+		//(netlight_pin == GPIO_PIN_SET) ? LED_On() : LED_Off();
+
+		if((timer_val > 1900) && (timer_val < 2100)) {
+			/* 2000ms duration => GSM registered */
+			gsm_status.registered = true;
+		}
+		else { /*((timer_val > 700) && (timer_val < 900)) */
+			/* 800ms duration => GSM not registered */
+			gsm_status.registered = false;
+		}
+		/* Reset timer */
+		TIM2->CNT = 0;
 	}
 }
+
+
+/**
+ * @brief IRQ Handler for Timer2 timer
+ * @note Timer 2 is used to measure period of NETLIGHT pin signal
+ */
+void TIM2_IRQHandler(void)
+{
+	TIM2->SR = 0;
+	/* Timer overflow means 4 sec elapsed without NETLIGHT signal edge */
+	gsm_status.registered = false;
+}
+
+
+
+
+
+
+

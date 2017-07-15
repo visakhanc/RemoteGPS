@@ -63,7 +63,7 @@ volatile uint32_t remotewakeupon = 0;
 
 /* Private function prototypes -----------------------------------------------*/
 /* Private functions ---------------------------------------------------------*/
-static void SystemClockConfig_STOP(void);
+//static void SystemClockConfig_STOP(void);
 
 /*******************************************************************************
                        PCD BSP Routines

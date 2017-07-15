@@ -1,11 +1,10 @@
-/*
- * stm32f_uart.c
- *
- *	Interrupt driven driver for STM32F1xx UART module
- *
- *  Created on: Apr 8, 2017
- *      Author: Visakhan C
+/**
+ * @file	stm32f1_uart.c
+ * @brief	Interrupt driven driver for STM32F1xx UART module
+ * @author	Visakhan
+ * @date	April 8, 2017
  */
+
 
 #include "stm32f1_uart.h"
 #include "stm32f1xx_hal.h"
@@ -15,6 +14,11 @@ static USART_TypeDef *UartBasePtrs[] = {USART1, USART2, USART3};
 static uart_handle_t *s_UartHandles[UART_COUNT];
 
 
+/**
+ * @brief Get the UART instance corresponding to the UART Base address
+ * @param base : Base address of UART register structure
+ * @return UART instance number (0,1...)
+ */
 static uint32_t Uart_Get_Instance(USART_TypeDef *base)
 {
 	uint32_t i;
@@ -84,6 +88,8 @@ uint32_t Uart_Set_Callback(USART_TypeDef *base, uart_callback_t callback)
 	return 0;
 }
 
+
+
 uint32_t Uart_Send(USART_TypeDef *base, uint8_t *data, uint32_t size)
 {
 	uint32_t instance = Uart_Get_Instance(base);
@@ -112,9 +118,8 @@ uint32_t Uart_Send(USART_TypeDef *base, uint8_t *data, uint32_t size)
 	return 0;
 }
 
-/* Start receiving data by enabling Rx interrupt for the UART
- * 		Rx Buffer and size should be set explicitly before calling this function
- */
+
+
 uint32_t Uart_StartReceive(USART_TypeDef *base)
 {
 	/* Enable Receive Not Empty interrupt */
@@ -125,9 +130,9 @@ uint32_t Uart_StartReceive(USART_TypeDef *base)
 	return 0;
 }
 
-/* Stops reception og data for the UART by disabling Rx interrupt
- *
- */
+
+
+
 uint32_t Uart_StopReceive(USART_TypeDef *base)
 {
 	/* Disable Receive Not Empty interrupt */
@@ -138,9 +143,8 @@ uint32_t Uart_StopReceive(USART_TypeDef *base)
 	return 0;
 }
 
-/* Set Rx buffer and size parameters
- *
- */
+
+
 uint32_t Uart_Set_Rx_Params(USART_TypeDef *base, uint8_t *buf, uint32_t size)
 {
 	uint32_t instance = Uart_Get_Instance(base);
@@ -156,6 +160,8 @@ uint32_t Uart_Set_Rx_Params(USART_TypeDef *base, uint8_t *buf, uint32_t size)
 	handle->RxSize = size;
 	return 0;
 }
+
+
 
 uint32_t Uart_Receive(USART_TypeDef *base, uint8_t *buf, uint32_t size)
 {
@@ -194,9 +200,9 @@ uint32_t Uart_EnableRx(USART_TypeDef *base)
 
 }
 
-void UART_Rx_Tx_Handler(USART_TypeDef *base, uart_handle_t *handle)
+static void UART_Rx_Tx_Handler(USART_TypeDef *base, uart_handle_t *handle)
 {
-
+	//TODO: Handle concurrent access (through mutex or TxState?)
 	/* UART Transmit Register Empty Interrupt */
 	if((base->CR1 & USART_CR1_TXEIE) && (base->SR & USART_SR_TXE)) {
 		/* Transmit byte from buffer */

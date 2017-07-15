@@ -1,7 +1,7 @@
 /*
  * log_task.c
  *
- *	This task is responsible for, sending location data to a web server
+ *	This task is responsible for sending location data to a web server
  *	at regular intervals
  *
  *  Created on: Jun 17, 2016
@@ -11,17 +11,19 @@
 #include <gps_common.h>
 #include "config_private.h"
 #include "gsm_common.h"
+#include "gps_common.h"
 #include "http_utils.h"
 #include "num_utils.h"
 #include "debug_console.h"
 #include "board.h"
+#include "stm32f1_rtc.h"
 
 /* Macros */
 #define EVENT_START_LOGGING  	(1 << 0)
 #define EVENT_STOP_LOGGING		(1 << 1)
+#define EVENT_NEXT_LOG			(1 << 2)
 
 /* Globals */
-extern gps_info_struct gps_info;
 extern volatile int gps_count;
 extern volatile bool gps_progress;
 extern uint8_t http_buf[];
@@ -47,30 +49,34 @@ void log_task(void *pvParameters)
 	char print_buf[50];
 
 	xLogTaskHandle = xTaskGetCurrentTaskHandle();
+
 	do {
 		/* Wait until GSM module get registered */
 		vTaskDelay(1000);
-	} while (gsm_status.registerd != true);
+	} while (gsm_status.registered != true);
 
-	vTaskDelay(3000);
-	gsm_send_command("AT+QIFGCNT=0");
-	ev = gsm_wait_for_event(EVENT_GSM_OK|EVENT_GSM_ERROR, 1000);
-	if(ev & EVENT_GSM_ERROR) {
-		DEBUG_PUTS("Error: QIFGCNT");
+	//vTaskDelay(3000);
+	gsm_uart_acquire();
+	gsm_send_command("AT+QIREGAPP");
+	ev = gsm_wait_for_event(EVENT_GSM_OK|EVENT_GSM_ERROR, 500);
+	if(!(ev & EVENT_GSM_OK)) {
+		DEBUG_PUTS(ev ? "Error" : "Timeout");
+		DEBUG_PUTS(" (QIREGAPP)\r\n");
 	}
-	gsm_send_command("AT+QICSGP=1,\"www\"");
-	ev = gsm_wait_for_event(EVENT_GSM_OK|EVENT_GSM_ERROR, 1000);
-	if(ev & EVENT_GSM_ERROR) {
-		DEBUG_PUTS("Error: QICSGP");
+	gsm_send_command("AT+QIACT");
+	ev = gsm_wait_for_event(EVENT_GSM_OK|EVENT_GSM_ERROR, 10000);
+	if(!(ev & EVENT_GSM_OK)) {
+		DEBUG_PUTS(ev ? "Error" : "Timeout");
+		DEBUG_PUTS(" (QIACT)\r\n");
 	}
+	gsm_uart_release();
 
 	while(1)
 	{
-
 		/* Wait for Notification to start/stop logging */
 		if(pdTRUE == xTaskNotifyWait(0, -1UL, &notifValue, 8000)) {
 			if(notifValue & EVENT_START_LOGGING) {
-				DEBUG_PUTS("\r\nLogging started");
+				DEBUG_PUTS("Logging started\r\n");
 				//if(gprs_configure() != 0) {
 				//	DEBUG_PUTS("\r\nError: gprs_configure");
 				//}
@@ -81,7 +87,10 @@ void log_task(void *pvParameters)
 				//http_terminate();
 				//http_close_context();
 				//if(0 != gsm_uart_release()) { DEBUG_PUTS("\r\nlog: uart release fail"); }
-				DEBUG_PUTS("\r\nLogging stopped");
+				DEBUG_PUTS("Logging stopped\r\n");
+			}
+			if(notifValue & EVENT_NEXT_LOG) {
+				//RTC_Set_Counter(0);  //-->Now done inside RTC ISR
 			}
 		}
 #if LOG_ENABLED
@@ -112,13 +121,14 @@ void log_task(void *pvParameters)
 				//DEBUG_PUTS("\r\nlen = %d", offset);
 				
 				/* acquire gsm uart */
-				if(0 != gsm_uart_acquire()) { DEBUG_PUTS("\r\nlog: uart acquire fail"); }
-				/* Send location to server using HTTP GET method */
+				if(0 != gsm_uart_acquire()) { DEBUG_PUTS("log: uart_acquire failed\r\n"); }
+				/* Send location to server using HTTP POST method */
+				DEBUG_PUTS("\r\n\nLogging...\r\n");
 				ret = http_post(LOG_API_URL, sizeof(LOG_API_URL)-1, (uint8_t *)log_post_params, offset);
 				/* Release gsm uart */
-				if(0 != gsm_uart_release()) { DEBUG_PUTS("\r\nlog: uart release fail"); }
+				if(0 != gsm_uart_release()) { DEBUG_PUTS("log: uart_release failed\r\n"); }
 				if(HTTP_OK == ret) {
-					snprintf(print_buf, sizeof(print_buf), "\r\nPOST success (response: %d B )", gsm_status.http_recv_len);
+					snprintf(print_buf, sizeof(print_buf), "POST success (response: %d B )\r\n", gsm_status.http_recv_len);
 					Debug_Console_PutBuf((uint8_t *)print_buf, strlen(print_buf));
 					Debug_Console_PutBuf(http_buf, strlen(http_buf));
 					LED_On();
@@ -138,7 +148,7 @@ void log_task(void *pvParameters)
 					count++;
 				}
 				else {
-					sprintf(print_buf, "\r\nlog: POST failed (%d) (url: %d bytes)\r\n", ret, offset);
+					sprintf(print_buf, "log: POST failed (%d) (url: %d bytes)\r\n", ret, offset);
 					Debug_Console_PutBuf((uint8_t *)print_buf, strlen(print_buf));
 					Debug_Console_PutBuf((uint8_t *)log_post_params, strlen(log_post_params));
 					Debug_Console_PutBuf(http_buf, gsm_status.http_recv_len);
@@ -149,7 +159,6 @@ void log_task(void *pvParameters)
 				prev_lon = cur_lon;
 				gps_count = 0;
 				gps_progress = false;
-
 
 			}
 		}
@@ -163,6 +172,7 @@ void log_task_switch(void)
 {
 	uint32_t	notifValue;
 
+
 	if(true == logEnabled) {
 		logEnabled = false;
 		/* Set task notification value to stop logging */
@@ -175,4 +185,18 @@ void log_task_switch(void)
 	}
 
 	xTaskNotify(xLogTaskHandle, notifValue, eSetBits);
+}
+
+
+/* To be called externally inside RTC ISR to log next sample
+ * (another way for periodic logging, instead of Notify wait timeout) */
+void notify_next_log(void)
+{
+	BaseType_t 	xHigherPriorityTaskWoken = pdFALSE;
+
+	if(NULL == xLogTaskHandle) {
+		return;
+	}
+	xTaskNotifyFromISR(xLogTaskHandle, EVENT_NEXT_LOG, eSetBits, &xHigherPriorityTaskWoken);
+	portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
