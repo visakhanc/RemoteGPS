@@ -75,18 +75,24 @@ uint8_t Debug_Console_GetChar(void)
 }
 
 /* Writes a character to debug console */
-void Debug_Console_PutChar(uint8_t ch)
+uint32_t Debug_Console_PutChar(uint8_t ch)
 {
 	Uart_Send(DEBUG_UART, &ch, 1);
 	/* Wait till transmit is finished */
-	xSemaphoreTake(xDebugTxSyncSem, portMAX_DELAY);
+	if(pdFALSE == xSemaphoreTake(xDebugTxSyncSem, 100)) {
+		return 1;
+	}
+	return 0;
 }
 
-void Debug_Console_PutBuf(uint8_t *buf, uint32_t size)
+uint32_t Debug_Console_PutBuf(uint8_t *buf, uint32_t size)
 {
 	Uart_Send(DEBUG_UART, buf, size);
 	/* Wait till transmit is finished */
-	xSemaphoreTake(xDebugTxSyncSem, portMAX_DELAY);
+	if(pdFALSE == xSemaphoreTake(xDebugTxSyncSem, 1000)) {
+		return 1;
+	}
+	return 0;
 }
 
 /* Callback for Console UART Interrupt: Called from UART ISR; Puts received characters into a circular buffer

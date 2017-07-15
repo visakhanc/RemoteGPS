@@ -20,7 +20,7 @@
 extern uint8_t __print_buf[];
 uint32_t Debug_Console_Init(void);
 uint8_t Debug_Console_GetChar(void);
-void Debug_Console_PutChar(uint8_t ch);
-void Debug_Console_PutBuf(uint8_t *buf, uint32_t size);
+uint32_t Debug_Console_PutChar(uint8_t ch);
+uint32_t Debug_Console_PutBuf(uint8_t *buf, uint32_t size);
 
 #endif /* DEBUG_CONSOLE_H_ */
