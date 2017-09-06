@@ -40,7 +40,7 @@ http_error_t http_get(char *url, uint32_t urlLen)
 	if(ev & EVENT_GSM_HTTPCONNECT) {
 		DEBUG_PUTS("Sending URL\r\n");
 		gsm_send_command(url);
-		ev = gsm_wait_for_event(EVENT_GSM_OK|EVENT_GSM_CME_ERROR, 3000);
+		ev = gsm_wait_for_event(EVENT_GSM_OK|EVENT_GSM_CME, 3000);
 		if(!(ev & EVENT_GSM_OK)) {
 			ret = (gsm_status.cme_error == 0) ? HTTP_ERR_EVENT_TIMEOUT : gsm_status.cme_error;
 		}
@@ -102,71 +102,64 @@ http_error_t http_post(char *url, uint32_t urlLen, uint8_t *data, uint32_t dataL
 	EventBits_t ev;
 
 	gsm_status.cme_error = 0;
-	gsm_clear_event(EVENT_GSM_OK|EVENT_GSM_ERROR|EVENT_GSM_CME_ERROR);
+	gsm_clear_event(EVENT_GSM_OK|EVENT_GSM_ERROR|EVENT_GSM_CME|EVENT_GSM_HTTPREAD|EVENT_GSM_HTTPCONNECT);
 
 	/* Send URL to module */
 	snprintf(http_cmd_buf, sizeof(http_cmd_buf), "AT+QHTTPURL=%d,3", (int)urlLen);
 	gsm_status.http_sendto_module = true;
 	gsm_send_command(http_cmd_buf);
-	ev = gsm_wait_for_event(EVENT_GSM_HTTPCONNECT|EVENT_GSM_ERROR|EVENT_GSM_CME_ERROR, 3000);
+	ev = gsm_wait_for_event(EVENT_GSM_HTTPCONNECT|EVENT_GSM_ERROR|EVENT_GSM_CME, 5000);
 	if(ev & EVENT_GSM_HTTPCONNECT) {
 		DEBUG_PUTS("Sending URL..\r\n");
+		vTaskDelay(300);
 		gsm_send_command(url);
-		ev = gsm_wait_for_event(EVENT_GSM_OK|EVENT_GSM_CME_ERROR, 4000);
+		ev = gsm_wait_for_event(EVENT_GSM_OK|EVENT_GSM_CME|EVENT_GSM_ERROR, 5000);
 		if(!(ev & EVENT_GSM_OK)) {
-			ret = (gsm_status.cme_error == 0) ? HTTP_ERR_EVENT_TIMEOUT : gsm_status.cme_error;
+			Debug_Console_PutBuf(http_cmd_buf, sprintf(http_cmd_buf, "ERR: URL upload ev: 0x%08lx\r\n", ev));
+			ret = ev ? HTTP_ERR_URL_CMD: HTTP_ERR_EVENT_TIMEOUT;
 		}
 	}
-	else if(ev & (EVENT_GSM_ERROR|EVENT_GSM_CME_ERROR)) {
-		DEBUG_PUTS("URL cmd err\r\n");
-		ret = (gsm_status.cme_error) ? gsm_status.cme_error : HTTP_ERR_URL;
-	}
 	else {
-		DEBUG_PUTS("URL cmd timeout\r\n");
-		ret = HTTP_ERR_EVENT_TIMEOUT;
-		//ret = 2;
+		Debug_Console_PutBuf(http_cmd_buf, sprintf(http_cmd_buf, "URL NoConnect ev: 0x%08lx\r\n", ev));
+		ret = ev ? HTTP_ERR_URL_CMD: HTTP_ERR_EVENT_TIMEOUT;
 	}
 
 	if(!ret) {
-		DEBUG_PUTS("Sending POST Req..\r\n");
-		snprintf(http_cmd_buf, sizeof(http_cmd_buf), "AT+QHTTPPOST=%d,5,25", (int)dataLen);
+		DEBUG_PUTS("POST cmd...");
+		snprintf(http_cmd_buf, sizeof(http_cmd_buf), "AT+QHTTPPOST=%d,5,5", (int)dataLen);
+		vTaskDelay(300);
 		gsm_send_command(http_cmd_buf);
-		ev = gsm_wait_for_event(EVENT_GSM_HTTPCONNECT|EVENT_GSM_CME_ERROR|EVENT_GSM_ERROR, 25000);
+		ev = gsm_wait_for_event(EVENT_GSM_HTTPCONNECT|EVENT_GSM_CME|EVENT_GSM_ERROR, 40000);
 		if(ev & EVENT_GSM_HTTPCONNECT) {
+			DEBUG_PUTS("Sending POST data..\r\n");
 			gsm_send_command((char *)data);
-			ev = gsm_wait_for_event(EVENT_GSM_OK|EVENT_GSM_CME_ERROR, 6000);
-			if(ev & EVENT_GSM_CME_ERROR) {
-				DEBUG_PUTS("POST data error!\r\n");
-				ret = gsm_status.cme_error;
+			ev = gsm_wait_for_event(EVENT_GSM_OK|EVENT_GSM_CME|EVENT_GSM_ERROR, 15000);
+			if(!(ev & EVENT_GSM_OK)) {
+				Debug_Console_PutBuf(http_cmd_buf, sprintf(http_cmd_buf, "POST NoOK ev: 0x%08lx\r\n", ev));
+				ret = ev ? HTTP_ERR_POST : HTTP_ERR_EVENT_TIMEOUT;
 			}
-			else if(!(ev & EVENT_GSM_OK)) {
-				ret = HTTP_ERR_EVENT_TIMEOUT;
-			}
-		}
-		else if(ev & (EVENT_GSM_CME_ERROR|EVENT_GSM_ERROR)) {
-			DEBUG_PUTS("POST Req error!\r\n");
-			ret = gsm_status.cme_error ? gsm_status.cme_error : HTTP_ERR_POST;
 		}
 		else {
-			DEBUG_PUTS("POST cmd timeout!\r\n");
-			ret = HTTP_ERR_EVENT_TIMEOUT;
+			Debug_Console_PutBuf(http_cmd_buf, sprintf(http_cmd_buf, "POST NoConnect ev: 0x%08lx\r\n", ev));
+			ret = ev ? HTTP_ERR_POST : HTTP_ERR_EVENT_TIMEOUT;
 		}
 	}
 	if(!ret) {
 		/* Read received data */
 		gsm_status.http_sendto_module = false;
-		DEBUG_PUTS("Read..\r\n");
-		gsm_send_command("AT+QHTTPREAD=20");
-		ev = gsm_wait_for_event(EVENT_GSM_HTTPREAD|EVENT_GSM_CME_ERROR, 6000);
+		DEBUG_PUTS("Read..");
+		gsm_send_command("AT+QHTTPREAD=20"); /* Read data (20 sec after READ, HTTP session times out) */
+		ev = gsm_wait_for_event(EVENT_GSM_HTTPREAD|EVENT_GSM_CME|EVENT_GSM_ERROR, 15000);
 		if(ev & EVENT_GSM_HTTPREAD) {
-			DEBUG_PUTS("POST OK\r\n");
+			DEBUG_PUTS("Read OK\r\n");
 		}
 		else {
-			DEBUG_PUTS("READ error\r\n");
-			ret = gsm_status.cme_error ? gsm_status.cme_error : HTTP_ERR_EVENT_TIMEOUT;
+			Debug_Console_PutBuf(http_cmd_buf, sprintf(http_cmd_buf, "ERR: Read ev: 0x%08lx\r\n", ev));
+			ret = ev ? HTTP_ERR_READ: HTTP_ERR_EVENT_TIMEOUT;
 		}
 	}
 
+	gsm_clear_event(EVENT_GSM_OK|EVENT_GSM_ERROR|EVENT_GSM_CME);
 	return ret;
 }
 
