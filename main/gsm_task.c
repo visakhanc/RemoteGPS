@@ -117,7 +117,7 @@ void gsm_debug_task(void *pArg)
  * @param cmd Null terminated AT command string
  * @return 0: Success, 1: Error
  */
-int gsm_send_command(const char *cmd)
+int gsm_send_command(char *cmd)
 {
 	int ret = 0;
 
@@ -184,10 +184,10 @@ int gsm_uart_release(void)
  * @param len Number of bytes to send
  * @return Always returns 0
  */
-int gsm_uart_send(const char *data, uint32_t len)
+int gsm_uart_send(char *data, uint32_t len)
 {
 	/* Initiate UART driver to send the data */
-	Uart_Send(GSM_UART, data, len);
+	Uart_Send(GSM_UART, (uint8_t *)data, len);
 
 	/* Block until UART handler signaling completion of Tx */
 	xSemaphoreTake(xGsmTxSyncSem, portMAX_DELAY);
@@ -195,6 +195,125 @@ int gsm_uart_send(const char *data, uint32_t len)
 	return 0;
 }
 
+
+/**
+ *	@brief Turn-on GSM module using PWRKEY
+ *	@retvl None
+ */
+void gsm_poweron(void)
+{
+	HAL_GPIO_WritePin(GSM_PWRKEY_GPIO_PORT, GSM_PWRKEY_PIN, GPIO_PIN_SET);
+	vTaskDelay(1500);
+	HAL_GPIO_WritePin(GSM_PWRKEY_GPIO_PORT, GSM_PWRKEY_PIN, GPIO_PIN_RESET);
+	/* Wait until 'power_state' is changed by a NETLIGHT pin interrupt */
+	while(gsm_status.power_state != GSM_POWERON) {
+		vTaskDelay(100);
+	}
+}
+
+
+
+/**
+ *	@brief Turn-off GSM module using PWRKEY
+ *	@retval None
+ */
+void gsm_poweroff(void)
+{
+	/* Generate PWRKEY pulse of 700-1000ms width */
+	HAL_GPIO_WritePin(GSM_PWRKEY_GPIO_PORT, GSM_PWRKEY_PIN, GPIO_PIN_SET);
+	vTaskDelay(850);
+	HAL_GPIO_WritePin(GSM_PWRKEY_GPIO_PORT, GSM_PWRKEY_PIN, GPIO_PIN_RESET);
+	/* Wait until 'power_state' is changed by a inactivity of NETLIGHT pin */
+	while(gsm_status.power_state != GSM_POWERDOWN) {
+		vTaskDelay(100);
+	}
+}
+
+/**
+ * @brief Turn-on and set up GSM module ready for operation
+ * @details Turn-on GSM module (if not done already) and sets up various parameters on the module, required
+ * for normal operation
+ * @retval None
+ */
+void gsm_start(void)
+{
+	char gsm_cmd[20];
+	EventBits_t ev;
+	uint32_t count;
+
+	/* Time to update Power State of module by NETLIGHT ISR (Also, 100ms delay is required before Power-on) */
+	//vTaskDelay(2500); // Taken to gsm_poweron()
+	gsm_uart_acquire();
+	if(gsm_status.power_state == GSM_POWERDOWN) {
+		/* Power on the module */
+		DEBUG_PUTS("POWWERING ON..\r\n");
+		LED_On();
+		gsm_poweron();
+		LED_Off();
+		/* Check if module turned on */
+		count = 0;
+		do {
+			gsm_send_command("AT");
+			ev = gsm_wait_for_event(EVENT_GSM_OK, 1000);
+			if(++count == 5) {
+				/* Module not turned on successfully - suspend this task */
+				vTaskSuspend(NULL);
+			}
+		} while (!(ev & EVENT_GSM_OK));
+		/* Set fixed baud rate for UART */
+		sprintf(gsm_cmd, "AT+IPR=%d", GSM_UART_BAUDRATE);
+		gsm_send_command(gsm_cmd);
+		if(!(gsm_wait_for_event(EVENT_GSM_OK, 1000) & EVENT_GSM_OK)) {
+			DEBUG_PUTS("GSM: Set baud: NOT OK\r\n");
+		}
+	}
+	/* Disable AT echo */
+	gsm_send_command("ATE0");
+	if(!(gsm_wait_for_event(EVENT_GSM_OK, 1000) & EVENT_GSM_OK)) {
+		DEBUG_PUTS("ATE0 NOT OK\r\n");
+	}
+	/* GPRS Configuration */
+	gsm_send_command("AT+QIFGCNT=0"); /* Select Context */
+	ev = gsm_wait_for_event(EVENT_GSM_OK|EVENT_GSM_ERROR, 1000);
+	if(!(ev & EVENT_GSM_OK)) {
+		DEBUG_PUTS(ev ? "Error" : "Timeout");
+		DEBUG_PUTS(" (QIFGCNT)\r\n");
+	}
+	gsm_send_command("AT+QICSGP=1,\"www\""); /* Set APN */
+	ev = gsm_wait_for_event(EVENT_GSM_OK|EVENT_GSM_ERROR, 1000);
+	if(!(ev & EVENT_GSM_OK)) {
+		DEBUG_PUTS(ev ? "Error" : "Timeout");
+		DEBUG_PUTS(" (QICSGP)\r\n");
+	}
+	/* Enable CLIP */
+	gsm_send_command("AT+CLIP=1");
+	if(!(gsm_wait_for_event(EVENT_GSM_OK|EVENT_GSM_ERROR|EVENT_GSM_CME, 1000) & EVENT_GSM_OK)) {
+		DEBUG_PUTS("CLIP Err\r\n");
+	}
+	/* Enable Sleep mode */
+	gsm_send_command("AT+QSCLK=1");
+	if(!(gsm_wait_for_event(EVENT_GSM_OK|EVENT_GSM_ERROR|EVENT_GSM_CME, 1000) & EVENT_GSM_OK)) {
+		DEBUG_PUTS("QSCLK err\r\n");
+	}
+	/* Detect SIM card */
+	DEBUG_PUTS("Detecting SIM...\r\n");
+	do {
+		gsm_send_command("AT+CPIN?");
+		ev = gsm_wait_for_event(EVENT_GSM_OK|EVENT_GSM_CME, 1000);
+		if(ev & EVENT_GSM_CME) {
+			DEBUG_PUTS("CPIN CME\r\n");
+			vTaskDelay(500);
+		}
+	} while (!(ev & EVENT_GSM_OK));
+	gsm_status.sim_present = true;
+	DEBUG_PUTS("SIM Detected\r\n");
+	/* Wait until Module is registered to GSM network */
+	while(gsm_status.registered == false) {
+		vTaskDelay(500);
+	}
+	DEBUG_PUTS("\nRegistered\r\n");
+	gsm_uart_release();
+}
 
 
 
@@ -206,7 +325,7 @@ int gsm_uart_send(const char *data, uint32_t len)
  * @param address Recipient address
  * @return 0: Success, 1: Error
  */
-int gsm_send_sms(const char *buf, int length, const char *address)
+int gsm_send_sms(char *buf, int length, const char *address)
 {
 	int ret = 0;
 	uint8_t ctrl_z = 0x1A;
@@ -317,7 +436,6 @@ void gsm_rx_task(void *pArg)
 
 		/* Wait for signal from UART Rx handler */
 		if(ulTaskNotifyTake(pdTRUE, portMAX_DELAY) == 1) {
-			gsm_status.power_state = GSM_POWERON;
 			/* Copy GSM response string to local buffer */
 			len = gsm_rx_len;
 			if(len >= sizeof(rx_buf)) {
@@ -350,15 +468,7 @@ void gsm_rx_task(void *pArg)
 			}
 			/* Others */
 			else {
-				if (NULL != strstr((char *)rx_buf, "+CLIP")) {
-					/* Get the caller number from CLIP line */
-					len = get_quoted_string(&rx_buf[7], gsm_status.caller, sizeof(gsm_status.caller));
-					if (len > 0) {
-						xEventGroupSetBits(xGsmEvent, EVENT_GSM_CLIP);
-					}
-				}
-
-				if (NULL != strstr((char *)rx_buf, "+CREG")) {
+				if(NULL != strstr((char *)rx_buf, "+CREG")) {
 					/* Get and update registration status */
 					if ((rx_buf[9] == '1') || (rx_buf[9] == '5')) {
 						gsm_status.registered = true;
@@ -368,25 +478,69 @@ void gsm_rx_task(void *pArg)
 						gsm_status.registered = false;
 					}
 				}
-
-				if (NULL != strstr((char *)rx_buf, "CONNECT")) {
+				else if(NULL != strstr((char *)rx_buf, "CONNECT")) {
 					if(gsm_status.http_sendto_module == true) {	/* http data to be sent to module */
 						/* Notify that data can be sent now */
 						xEventGroupSetBits(xGsmEvent, EVENT_GSM_HTTPCONNECT);
 					}
 					else { 	/* http data to be received from module */
-#if GSM_DEBUG == 0
+#if !GSM_DEBUG
 						/* Tell UART Rx handler to receive characters to http buffer */
 						http_buf_switch = true;
 #endif
 					}
 				}
-
-				if (NULL != strstr((char *)rx_buf, "+CME ERROR")) {
-					parse_decimal(&gsm_status.cme_error, (char *)&rx_buf[12], 4);
-					xEventGroupSetBits(xGsmEvent, EVENT_GSM_CME_ERROR);
+				else if(NULL != strstr((char *)rx_buf, "+CME")) {
+					parse_decimal(&temp, (char *)&rx_buf[12], 4);
+					gsm_status.cme_error = temp;
+					xEventGroupSetBits(xGsmEvent, EVENT_GSM_CME);
 				}
+				else if(NULL != strstr((char *)rx_buf, "+CBC")) {
+					len = 10; /* index of second comma */
+					if(rx_buf[len] != ',') {
+						if(rx_buf[++len] != ',')
+							len -=2;
+					}
+					len++;
+					parse_decimal(&temp, (char *)&rx_buf[len], 4);
+					gsm_status.bat_voltage = temp;
+				}
+				else if(NULL != strstr((char *)rx_buf, "STATE")) {
+					if(NULL != strstr((char *)&rx_buf[10], "INI")) {
+						gsm_status.gprs_state = GPRS_INITIAL;
+					}
+					else if(NULL != strstr((char *)&rx_buf[10], "GPR")) {
+						gsm_status.gprs_state = GPRS_ACT;
+					}
+					else if(NULL != strstr((char *)&rx_buf[11], "DEA")) {
+						gsm_status.gprs_state = GPRS_DEACT;
+					}
+					//else if(NULL != strstr((char *)rx_buf[10], "IND")) {
 
+					//	gsm_status.gprs_state = GPRS_IND;
+					//}
+					else if(NULL != strstr((char *)&rx_buf[10], "STAR")) {
+						gsm_status.gprs_state = GPRS_START;
+					}
+					else if(NULL != strstr((char *)&rx_buf[10], "CONF")) {
+						gsm_status.gprs_state = GPRS_CONFIG;
+					}
+
+				}
+				else if(NULL != strstr((char *)rx_buf, "DEACT")) {
+					xEventGroupSetBits(xGsmEvent, EVENT_GSM_DEACT);
+				}
+				else if(NULL != strstr((char *)rx_buf, "+CLIP")) {
+					/* Get the caller number from CLIP line */
+					len = get_quoted_string(&rx_buf[7], gsm_status.caller, sizeof(gsm_status.caller));
+					if (len > 0) {
+						xEventGroupSetBits(xGsmEvent, EVENT_GSM_CLIP);
+					}
+				}
+				else if(NULL != strstr((char *)rx_buf, "UNDER")) {
+					/* Under-voltage warning */
+					xEventGroupSetBits(xGsmEvent, EVENT_GSM_UNDERVOLTAGE);
+				}
 			}
 
 		}
@@ -425,10 +579,8 @@ void gsm_clear_event(uint32_t events)
  */
 uint32_t gsm_wait_for_event(uint32_t events, uint32_t delay_ticks)
 {
-	TickType_t ticksToWait = (0 == delay_ticks)  ? portMAX_DELAY : delay_ticks;
-	EventBits_t eventsToWait = (EventBits_t)events;
-
-	return xEventGroupWaitBits(xGsmEvent, eventsToWait, pdTRUE, pdFALSE, ticksToWait);
+	TickType_t ticksToWait = (delay_ticks)  ? delay_ticks : portMAX_DELAY;
+	return xEventGroupWaitBits(xGsmEvent, (EventBits_t)events, pdTRUE, pdFALSE, ticksToWait);
 }
 
 
