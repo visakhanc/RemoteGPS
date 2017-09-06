@@ -16,18 +16,27 @@
 /*---------------- SYSTEM CONFIGURATION ------------------*/
 
 /* Enable or disable battery charging indicator pin interrupt */
-#define BATCHRG_INTERRUPT_ENABLED		0
+#define BATCHRG_INTERRUPT_ENABLED		1
 /* Enable or disable GSM Netlight pin interrupt */
 #define NETLIGHT_INTERRUPT_ENABLED		1
-/* Enable ADC */
-#define ADC_ENABLED						0
 /* Enable USB */
-#define USB_ENABLED						0
+#define USB_ENABLED						1
 
 /* Define to 1 if GSM module need to be tested through command prompt */
 #define GSM_DEBUG 						0
+/* ENable Logging functionality */
 #define LOG_ENABLED						1
+/* Print GPS data in display task */
 #define	DEBUG_GPS						0
+/* Enable Sleep functionality to save power */
+#define SLEEP_ENABLED					1
+
+/* Default and minimum sleep interval while running on battery (in seconds) */
+#define DEFAULT_SLEEP_INTERVAL			(2*60)
+#define MINIMUM_SLEEP_INTERVAL			(2*60)
+/* Default log interval (in seconds) */
+#define DEFAULT_LOG_INTERVAL			8
+#define MINIMUM_LOG_INTERVAL			8
 
 /*------------------- SYSTEM CONFIGURATION --------------------*/
 
@@ -93,18 +102,6 @@
 #define GSM_UART_BAUDRATE				9600
 
 
-/*!
- * @brief Structure to store various state parameters of the board
- */
-typedef struct _board_state {
-	volatile bool charging;		/**< Battery charging(true) or not charging(false) */
-	volatile float bat_voltage; /**< Current battery voltage */
-} board_state_t;
-
-
-/* Globals */
-extern board_state_t 	board_state;
-
 /* Public Function Declarations */
 
 /**
@@ -149,5 +146,30 @@ void GPS_ForceOn_Low(void);
  * @retval  None
  */
 void GPS_ForceOn_High(void);
+
+/**
+ * @brief 	Checks if battery is currently charging or not
+ * @retval	TRUE if charging FALSE if not charging
+ */
+bool Battery_Charging(void);
+
+/**
+ * @brief 	Set GPIO pins in least power consuming state (Analog mode)
+ * @retval 	None
+ */
+void GPIO_Set_LowPower(void);
+
+/**
+ * @brief 	Set GPIO pins in Normal configuration (To be called on returning from low power state)
+ * @retval 	None
+ */
+void GPIO_Set_Normal(void);
+
+/**
+ * @brief	Reset MCU using Independent Watchdog (IWDG) after ~0.1ms delay
+ * @retval	None
+ */
+void Watchdog_Reset(void);
+
 
 #endif /* BOARD_H_ */
