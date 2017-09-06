@@ -85,9 +85,9 @@ uint32_t Debug_Console_PutChar(uint8_t ch)
 	return 0;
 }
 
-uint32_t Debug_Console_PutBuf(uint8_t *buf, uint32_t size)
+uint32_t Debug_Console_PutBuf(char *buf, uint32_t size)
 {
-	Uart_Send(DEBUG_UART, buf, size);
+	Uart_Send(DEBUG_UART, (uint8_t *)buf, size);
 	/* Wait till transmit is finished */
 	if(pdFALSE == xSemaphoreTake(xDebugTxSyncSem, 1000)) {
 		return 1;

@@ -31,7 +31,7 @@ typedef struct _gps_time
  */
 typedef enum _gps_fix
 {
-	NO_FIX = 0, //!< No Fix
+	GPS_NOFIX = 0, //!< No Fix
 	GPS_FIX = 1,//!< GPS Fix
 	DGPS_FIX = 2//!< DGPS Fix
 } gps_fix_type;
@@ -47,22 +47,22 @@ typedef struct _gps_info
 	gps_time_struct time;	/**< Date and time  */
 
 	/* Position */
-	char noth_south;		/**< North-South indicator for latitude: 'N' or 'S' */
-	char east_west;			/**< East-West indicator for longitude: 'E' or 'W' */
-	float latitude;			/**< Latitude with 6 digit fractional part */
-	float longitude;		/**< Longitude with 6 digit fractional part */
-	float hdop;				/**< Horizontal degree of precision */
-	int velocity;			/**< Velocity in kmph */
-	int course;				/**< Course (direction) in degrees */
-	int altitude;			/**< MSL Altitude (meters) */
-	gps_fix_type fix;		/**< Fix type */
-	int sat_used;			/**< Number of used satellites */
-	bool ext_antenna;		/**< External Antenna connected? */
+	//volatile char noth_south;		/**< North-South indicator for latitude: 'N' or 'S' */
+	//volatile char east_west;			/**< East-West indicator for longitude: 'E' or 'W' */
+	volatile float latitude;			/**< Latitude with 6 digit fractional part */
+	volatile float longitude;		/**< Longitude with 6 digit fractional part */
+	volatile float hdop;				/**< Horizontal degree of precision */
+	volatile int velocity;			/**< Velocity in kmph */
+	volatile int course;				/**< Course (direction) in degrees */
+	volatile int altitude;			/**< MSL Altitude (meters) */
+	volatile gps_fix_type fix;		/**< Fix type */
+	volatile int sat_used;			/**< Number of used satellites */
+	volatile bool ext_antenna;		/**< External Antenna connected? */
 
 } gps_info_struct, *gps_info_struct_ptr;
 
 
-extern volatile gps_info_struct gps_info;
+extern gps_info_struct gps_info;
 
 /**
  * @brief Parse a GGA sentence in NMEA format and updates GPS info structure

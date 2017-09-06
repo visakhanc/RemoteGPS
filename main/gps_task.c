@@ -37,7 +37,10 @@ static void gps_uart_rx_handler(USART_TypeDef *base, uart_handle_t *handle, uart
 /**********************************************************
  * 					GLOBAL VARIABLES
  *********************************************************/
+
+/* Total number of GPS sentences parsed by GPS task (Reset on each successful log) */
 volatile int gps_count = 0;
+/* GPS co-ordinates to be logged now IS DIFFERENT from previously logged co-ordinates? */
 volatile bool gps_progress = false;
 
 
@@ -65,7 +68,7 @@ static xSemaphoreHandle xGpsTxSyncSem;
 static xSemaphoreHandle xGpsAckSem;
 
 /* Structure holding updated GPS status values (latitude, longitude etc.) */
-volatile gps_info_struct gps_info;
+gps_info_struct gps_info;
 
 /* Driver Handle structure for GPS UART */
 uart_handle_t gps_uart_handle;
@@ -148,7 +151,7 @@ void gps_task(void *pArg)
 			gps_count++;
 		}
 		/* Check for GPS Fix */
-		if (NO_FIX != gps_info.fix) {
+		if (GPS_NOFIX != gps_info.fix) {
 			//LED_On();
 		}
 		else {

@@ -12,15 +12,12 @@
 #include <string.h>
 #include "board.h"
 
-#define DEBUG_PUTS(x)					Debug_Console_PutBuf((uint8_t *)(x), strlen(x))
-#define PRINTF(x)	\
-		snprintf((char *)__print_buf, sizeof(__print_buf), (x)); \
-		Debug_Console_PutBuf(__print_buf, strlen((char *)__print_buf));
+#define DEBUG_PUTS(x)					Debug_Console_PutBuf((char *)(x), strlen(x))
 
 extern uint8_t __print_buf[];
 uint32_t Debug_Console_Init(void);
 uint8_t Debug_Console_GetChar(void);
 uint32_t Debug_Console_PutChar(uint8_t ch);
-uint32_t Debug_Console_PutBuf(uint8_t *buf, uint32_t size);
+uint32_t Debug_Console_PutBuf(char *buf, uint32_t size);
 
 #endif /* DEBUG_CONSOLE_H_ */
