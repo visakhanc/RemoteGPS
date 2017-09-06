@@ -39,109 +39,24 @@ static uint8_t gsm_tx_buf[200];
 //static char maps_api_url[100] = MAPS_API_URL;
 #define URL_OFFSET  (sizeof(MAPS_API_URL)-1)
 
+//static char print_buf[50];
+
+
+
 
 void message_task(void *pArg)
 {
-	char gsm_cmd[20];
-	EventBits_t ev;
-	uint32_t count = 0;
+	//char gsm_cmd[20];
+	//EventBits_t ev;
+	//uint32_t count;
 
 #if !GSM_DEBUG
-	vTaskDelay(200);
 	DEBUG_PUTS("Initializing Modem\r\n");
-	/* Get access to GSM UART */
-	if(gsm_uart_acquire() != 0) {
-		DEBUG_PUTS("\r\nError: gsm_uart_acquire()");
-	}
-	/* Check if module is already powered on */
-	gsm_send_command("AT");
-	ev = gsm_wait_for_event(EVENT_GSM_OK, 1000);
-	if(!(ev & EVENT_GSM_OK)) {
-		/* Power on the GSM module */
-		LED_On();
-		HAL_GPIO_WritePin(GSM_PWRKEY_GPIO_PORT, GSM_PWRKEY_PIN, GPIO_PIN_SET);
-		vTaskDelay(1500);
-		HAL_GPIO_WritePin(GSM_PWRKEY_GPIO_PORT, GSM_PWRKEY_PIN, GPIO_PIN_RESET);
-		LED_Off();
-		do {
-			gsm_send_command("AT");
-			ev = gsm_wait_for_event(EVENT_GSM_OK, 1000);
-			if(++count == 5) {
-				break;
-			}
-		} while (!(ev & EVENT_GSM_OK));
-		if(count == 5) {
-			/* No response to "AT" in 5 sec, module failed to turn on */
-			DEBUG_PUTS("GSM: Turn-on FAIL\r\n");
-			gsm_status.power_state = GSM_POWERDOWN;
-			vTaskSuspend(NULL); /* Suspend this task */
-		}
-		/* Fix baud rate */
-		sprintf(gsm_cmd, "AT+IPR=%d", GSM_UART_BAUDRATE);
-		gsm_send_command(gsm_cmd);
-		if(gsm_wait_for_event(EVENT_GSM_OK, 1000) == 0) {
-			DEBUG_PUTS("GSM: Set baud: NOT OK\r\n");
-		}
-	}
-	gsm_status.power_state = GSM_POWERON;
-	/* Disable AT echo */
-	gsm_send_command("ATE0");
-	ev = gsm_wait_for_event(EVENT_GSM_OK, 1000);
-	if(ev & EVENT_GSM_OK) {
-		DEBUG_PUTS("ATE0 OK\r\n");
-	}
-#if 0
-	if(ev & EVENT_GSM_OK) {
-		DEBUG_PUTS("SIM Detected\r\n");
-	}
-	else if(ev & EVENT_GSM_CME_ERROR) {
-		DEBUG_PUTS("CPIN CME Error\r\n");
-	}
+	gsm_start();
 #endif
-	/* GPRS Configuration */
-	gsm_send_command("AT+QIFGCNT=0"); /* Select Context */
-	ev = gsm_wait_for_event(EVENT_GSM_OK|EVENT_GSM_ERROR, 500);
-	if(!(ev & EVENT_GSM_OK)) {
-		DEBUG_PUTS(ev ? "Error" : "Timeout");
-		DEBUG_PUTS(" (QIFGCNT)\r\n");
-	}
-	gsm_send_command("AT+QICSGP=1,\"www\""); /* Set APN */
-	ev = gsm_wait_for_event(EVENT_GSM_OK|EVENT_GSM_ERROR, 500);
-	if(!(ev & EVENT_GSM_OK)) {
-		DEBUG_PUTS(ev ? "Error" : "Timeout");
-		DEBUG_PUTS(" (QICSGP)\r\n");
-	}
-
-	/* SIM card present? */
-	do {
-		gsm_send_command("AT+CPIN?");
-		ev = gsm_wait_for_event(EVENT_GSM_OK, 1000);
-		DEBUG_PUTS("Detecting SIM...\r\n");
-	} while (!(ev & EVENT_GSM_OK));
-	gsm_status.sim_present = true;
-	DEBUG_PUTS("SIM Detected\r\n");
-
-	/* Registration complete? */
-	do {
-		gsm_send_command("AT+CREG?");
-		ev = gsm_wait_for_event(EVENT_GSM_OK, 1000);
-	} while (!(ev & EVENT_GSM_CREG));
-	DEBUG_PUTS("\nRegistered\r\n");
-
-	/* Enable CLIP */
-	gsm_send_command("AT+CLIP=1");
-	ev = gsm_wait_for_event(EVENT_GSM_OK, 1000);
-
-	/* Release GSM UART */
-	gsm_uart_release();
-#endif  // !GSM_DEBUG
 
 	while (1) {
-
-
 		vTaskDelay(2000);
-
-
 #if 0
 		/* Waiting for the call */
 		ev = gsm_wait_for_event(EVENT_GSM_SENDMSG, 0);
@@ -162,7 +77,6 @@ void message_task(void *pArg)
 				continue;
 			}
 
-			// Convert to +/- according to N/S
 			cur_lat = gps_info.latitude;
 			cur_lon = gps_info.longitude;
 			len = float_to_string(&cur_lat, 6, (uint8_t *)&maps_api_url[URL_OFFSET]);
