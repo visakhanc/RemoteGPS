@@ -15,6 +15,7 @@ int gps_parse_gga(const char *buf, gps_info_struct_ptr gps_info_ptr)
 {
 	char *ptr;
 	int num;
+	int num2;
 	float temp;
 
 	/* 1. Time */
@@ -46,7 +47,11 @@ int gps_parse_gga(const char *buf, gps_info_struct_ptr gps_info_ptr)
 	/* 3.  N/S indicator */
 	if(*++ptr != ',')
 	{
-		gps_info_ptr->noth_south = *ptr;
+		//gps_info_ptr->noth_south = *ptr;
+		/* Change latitude negative if south coordinate */
+		if('S' == *ptr) {
+			gps_info_ptr->latitude = -gps_info_ptr->latitude;
+		}
 		ptr++;
 	}
 
@@ -64,7 +69,11 @@ int gps_parse_gga(const char *buf, gps_info_struct_ptr gps_info_ptr)
 	/* 5. E/W indicator */
 	if(*++ptr != ',')
 	{
-		gps_info_ptr->east_west = *ptr;
+		//gps_info_ptr->east_west = *ptr;
+		/* Change longitude negative if West coordinate */
+		if('W' == *ptr) {
+			gps_info.longitude = -gps_info.longitude;
+		}
 		ptr++;
 	}
 
@@ -73,10 +82,10 @@ int gps_parse_gga(const char *buf, gps_info_struct_ptr gps_info_ptr)
 	{
 		switch(*ptr)
 		{
-			case '0' : gps_info_ptr->fix = NO_FIX; break;
+			case '0' : gps_info_ptr->fix = GPS_NOFIX; break;
 			case '1' : gps_info_ptr->fix = GPS_FIX; break;
 			case '2' : gps_info_ptr->fix = DGPS_FIX; break;
-			default	 : gps_info_ptr->fix = NO_FIX; break;
+			default	 : gps_info_ptr->fix = GPS_NOFIX; break;
 		}
 		ptr++;
 	}
@@ -85,7 +94,8 @@ int gps_parse_gga(const char *buf, gps_info_struct_ptr gps_info_ptr)
 	if(*++ptr != ',')
 	{
 		num = (',' == *(ptr+1)) ? 1 : 2;
-		parse_decimal(&gps_info_ptr->sat_used, ptr, num);
+		parse_decimal(&num2, ptr, num);
+		gps_info_ptr->sat_used = num2;
 		ptr += num;
 	}
 
@@ -97,8 +107,8 @@ int gps_parse_gga(const char *buf, gps_info_struct_ptr gps_info_ptr)
 		{
 			num++;
 		}
-
-		parse_float(&gps_info_ptr->hdop, ptr, num);
+		parse_float(&temp, ptr, num);
+		gps_info_ptr->hdop = temp;
 		ptr += num;
 	}
 
