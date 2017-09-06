@@ -43,6 +43,35 @@ void RTC_Init(void)
 	RTC_Disable_Config();
 }
 
+
+/**
+ * @brief Initializes RTC with LSI oscillator as clock
+ */
+void RTC_Init_LSI(void)
+{
+	__HAL_RCC_PWR_CLK_ENABLE();
+	/* Disable backup register protection - to configure RTC */
+	PWR->CR |= PWR_CR_DBP;
+
+	/* Turn on LSI clock and wait to become stable */
+	RCC->CSR |= RCC_CSR_LSION;
+	while(!(RCC->CSR & RCC_CSR_LSIRDY))
+		;
+	/* If RTC clock is already selected, it can be changed only with a Backup Reset */
+	if(RCC->BDCR & RCC_BDCR_RTCSEL) {
+		__HAL_RCC_BACKUPRESET_FORCE();	// Reset backup domain
+		__HAL_RCC_BACKUPRESET_RELEASE();
+	}
+	/* Select LSI as RTC clock */
+	RCC->BDCR |= RCC_BDCR_RTCSEL_LSI | RCC_BDCR_RTCEN;
+	/* Set RTC prescaler value */
+	RTC_Enable_Config();
+	RTC->PRLH = 0;
+	RTC->PRLL = 0x9E80; // ~40kHz
+	//RTC->CRH |= RTC_CRH_SECIE;
+	RTC_Disable_Config();
+}
+
 /**
  * @brief Program RTC counter with given value
  * @param count Count to be set for RTC counter

@@ -32,6 +32,14 @@ void RCC_HSE_Disable(void);
 
 
 /**
+ * @brief Enables the HSI clock
+ * @retval None
+ */
+void RCC_HSI_Enable(void);
+
+
+
+/**
  * @brief Disable the HSI clock
  * @attention HSI clock cannot be disabled when HSI or HSI through PLL is currently being used as System clock.
  * In this case, switch system clock to use HSE clock, before disabling HSI clock.

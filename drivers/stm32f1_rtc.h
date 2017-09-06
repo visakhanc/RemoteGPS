@@ -12,6 +12,7 @@
 #include <stdbool.h>
 
 void RTC_Init(void);
+void RTC_Init_LSI(void);
 void RTC_Alarm_Config(uint32_t val);
 void RTC_Set_Counter(uint32_t count);
 uint32_t RTC_Get_Count(void);

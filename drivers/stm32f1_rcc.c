@@ -35,6 +35,23 @@ void RCC_HSE_Disable(void)
 }
 
 
+void RCC_HSI_OscInit(void)
+{
+	/* Enable HSI Oscillator */
+
+}
+
+
+void RCC_HSI_Enable(void)
+{
+	/* Turn on HSI clock */
+	__HAL_RCC_HSI_ENABLE();
+
+	/* Wait until HSI is enabled */
+	while((RCC->CR & RCC_CR_HSIRDY) == RESET)
+		;
+}
+
 void RCC_HSI_Disable(void)
 {
 	/* Turn off HSI */
