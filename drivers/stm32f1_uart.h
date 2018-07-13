@@ -91,7 +91,7 @@ struct uart_handle {
 };
 
 /**
- * @ brief Strucutre definition for UART initialization parameters
+ * @brief Structure definition for UART initialization parameters
  */
 typedef struct {
 	uint32_t BaudRate;				/*!< Baud rate in bps */
